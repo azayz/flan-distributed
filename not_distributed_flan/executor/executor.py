@@ -26,7 +26,6 @@ def set_random_seeds(random_seed=0):
 
 
 class FlanExecutor(Executor):
-
     def __init__(self, model_name: str, **kwargs):
         super().__init__(**kwargs)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -34,7 +33,9 @@ class FlanExecutor(Executor):
         self.model.to('cuda:0')
 
     @requests
-    def generate(self, docs: DocumentArray[InputSchema], **kwargs) -> DocumentArray[OutputSchema]:
+    def generate(
+        self, docs: DocumentArray[InputSchema], **kwargs
+    ) -> DocumentArray[OutputSchema]:
         outputs = DocumentArray[OutputSchema]()
         max_length = 100
         num_return_sequences = 1

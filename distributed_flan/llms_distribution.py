@@ -29,19 +29,19 @@ class T5StackWrapper(T5Stack):
         self.executor_client = executor_client
 
     def forward(
-            self,
-            input_ids=None,
-            attention_mask=None,
-            encoder_hidden_states=None,
-            encoder_attention_mask=None,
-            inputs_embeds=None,
-            head_mask=None,
-            cross_attn_head_mask=None,
-            past_key_values=None,
-            use_cache=None,
-            output_attentions=None,
-            output_hidden_states=None,
-            return_dict=None,
+        self,
+        input_ids=None,
+        attention_mask=None,
+        encoder_hidden_states=None,
+        encoder_attention_mask=None,
+        inputs_embeds=None,
+        head_mask=None,
+        cross_attn_head_mask=None,
+        past_key_values=None,
+        use_cache=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
     ):
 
         if past_key_values:
@@ -51,20 +51,24 @@ class T5StackWrapper(T5Stack):
         # format f doc array v2 somehow
         docs = self.executor_client.post(
             on='/encode',
-            inputs=DocumentArray([InputSchema(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                encoder_hidden_states=encoder_hidden_states,
-                encoder_attention_mask=encoder_attention_mask,
-                inputs_embeds=inputs_embeds,
-                head_mask=head_mask,
-                cross_attn_head_mask=cross_attn_head_mask,
-                past_key_values=past_key_values,
-                use_cache=use_cache,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-            )]),
+            inputs=DocumentArray(
+                [
+                    InputSchema(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        encoder_hidden_states=encoder_hidden_states,
+                        encoder_attention_mask=encoder_attention_mask,
+                        inputs_embeds=inputs_embeds,
+                        head_mask=head_mask,
+                        cross_attn_head_mask=cross_attn_head_mask,
+                        past_key_values=past_key_values,
+                        use_cache=use_cache,
+                        output_attentions=output_attentions,
+                        output_hidden_states=output_hidden_states,
+                        return_dict=return_dict,
+                    )
+                ]
+            ),
             parameters={},
             return_type=DocumentArray[OutputSchema],
         )
@@ -76,9 +80,7 @@ class T5StackWrapper(T5Stack):
         for key, value in outputs.items():
             if isinstance(value, torch.Tensor):
                 outputs[key] = value.to('cuda:0')
-        return BaseModelOutputWithPastAndCrossAttentions(
-            **outputs
-        )
+        return BaseModelOutputWithPastAndCrossAttentions(**outputs)
 
 
 class MyGateway(Gateway):
@@ -92,14 +94,17 @@ class MyGateway(Gateway):
             trust_remote_code=True,
         )
         embedding_layer = torch.nn.Embedding(config.vocab_size, config.d_model).to(
-            'cuda:0')
+            'cuda:0'
+        )
         encoder_client = Client(port=12346)
         decoder_client = Client(port=12347)
-        self.model.encoder = T5StackWrapper(config, encoder_client,
-                                            embed_tokens=embedding_layer)
+        self.model.encoder = T5StackWrapper(
+            config, encoder_client, embed_tokens=embedding_layer
+        )
 
-        self.model.decoder = T5StackWrapper(config, decoder_client,
-                                            embed_tokens=embedding_layer)
+        self.model.decoder = T5StackWrapper(
+            config, decoder_client, embed_tokens=embedding_layer
+        )
         self.model.lm_head = self.model.lm_head.to('cuda:0')
         self.model.parallel = True
 
@@ -111,7 +116,9 @@ class MyGateway(Gateway):
         def generate():
             max_length = 100
             num_return_sequences = 1
-            input_text = "Translate the following English text to French: 'Hey, how are you?'"
+            input_text = (
+                "Translate the following English text to French: 'Hey, how are you?'"
+            )
 
             input_ids = self.tokenizer.encode(input_text, return_tensors="pt")
 
@@ -130,7 +137,8 @@ class MyGateway(Gateway):
 
             # Decode the outputs to obtain text
             generated_text = [
-                self.tokenizer.decode(output, skip_special_tokens=True) for output in outputs
+                self.tokenizer.decode(output, skip_special_tokens=True)
+                for output in outputs
             ]
 
             return {'message': generated_text}
@@ -180,26 +188,39 @@ class MyGateway(Gateway):
         await self.server.serve()
 
 
-flow = Flow().config_gateway(
-    uses=MyGateway, port=12348, protocol='http', timeout_ready=-1, uses_with={
-        'model_name': "google/flan-t5-xl"
-    }
-).add(
-    uses=EncoderExecutor, uses_with={
-        'model_name': "google/flan-t5-xl",
-        'device_map': {
-            0: list(range(0, 8)),
-            1: list(range(8, 16)),
-            2: list(range(16, 24)),
-        }}, port=12346
-).add(
-    uses=DecoderExecutor, uses_with={
-        'model_name': "google/flan-t5-xl",
-        'device_map': {
-            0: list(range(0, 8)),
-            1: list(range(8, 16)),
-            2: list(range(16, 24)),
-        }}, port=12347
+flow = (
+    Flow()
+    .config_gateway(
+        uses=MyGateway,
+        port=12348,
+        protocol='http',
+        timeout_ready=-1,
+        uses_with={'model_name': "google/flan-t5-xl"},
+    )
+    .add(
+        uses=EncoderExecutor,
+        uses_with={
+            'model_name': "google/flan-t5-xl",
+            'device_map': {
+                0: list(range(0, 8)),
+                1: list(range(8, 16)),
+                2: list(range(16, 24)),
+            },
+        },
+        port=12346,
+    )
+    .add(
+        uses=DecoderExecutor,
+        uses_with={
+            'model_name': "google/flan-t5-xl",
+            'device_map': {
+                0: list(range(0, 8)),
+                1: list(range(8, 16)),
+                2: list(range(16, 24)),
+            },
+        },
+        port=12347,
+    )
 )
 with flow as f:
     f.block()

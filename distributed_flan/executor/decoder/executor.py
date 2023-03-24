@@ -37,12 +37,16 @@ class DecoderExecutor(Executor):
         super().__init__(**kwargs)
         self.model_name = model_name
         self.device_map = {int(k): v for k, v in device_map.items()}
-        self.model_decoder = AutoModelForSeq2SeqLM.from_pretrained(self.model_name).decoder
+        self.model_decoder = AutoModelForSeq2SeqLM.from_pretrained(
+            self.model_name
+        ).decoder
         self.model_decoder.parallelize(self.device_map)
         print('model sent to GPU')
 
     @requests
-    def decode(self, docs: DocumentArray[InputSchema], **kwargs) -> DocumentArray[OutputSchema]:
+    def decode(
+        self, docs: DocumentArray[InputSchema], **kwargs
+    ) -> DocumentArray[OutputSchema]:
         outputs = DocumentArray[OutputSchema]()
         for doc in docs:
             inputs = dict(doc)

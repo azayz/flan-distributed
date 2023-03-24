@@ -33,19 +33,22 @@ class OutputSchema(BaseDocument):
 
 
 class EncoderExecutor(Executor):
-
     def __init__(self, model_name: str, device_map: dict, **kwargs):
         super().__init__(**kwargs)
         self.model_name = model_name
         self.device_map = {}
         for k, v in device_map.items():
             self.device_map[int(k)] = v
-        self.model_encoder = AutoModelForSeq2SeqLM.from_pretrained(self.model_name).encoder
+        self.model_encoder = AutoModelForSeq2SeqLM.from_pretrained(
+            self.model_name
+        ).encoder
         self.model_encoder.parallelize(self.device_map)
         print('model sent to GPU')
 
     @requests
-    def encode(self, docs: DocumentArray[InputSchema], **kwargs) -> DocumentArray[OutputSchema]:
+    def encode(
+        self, docs: DocumentArray[InputSchema], **kwargs
+    ) -> DocumentArray[OutputSchema]:
         outputs = DocumentArray[OutputSchema]()
 
         for doc in docs:

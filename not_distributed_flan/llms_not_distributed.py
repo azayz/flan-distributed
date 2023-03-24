@@ -13,9 +13,13 @@ f = Flow().add(
 with f:
     docs = f.post(
         on='/',
-        inputs=DocumentArray([InputSchema(
-            text="Translate the following English text to French: 'Hey, how are you?'"
-        )]),
+        inputs=DocumentArray(
+            [
+                InputSchema(
+                    text="Translate the following English text to French: 'Hey, how are you?'"
+                )
+            ]
+        ),
         return_type=DocumentArray[OutputSchema],
     )
     outputs = dict(docs[0])
