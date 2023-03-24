@@ -1,0 +1,7 @@
+jtype: EncoderExecutor
+py_modules:
+  - executor.py
+metas:
+  name: EncoderExecutor
+  description: EncoderExecutor for generative text using Flan model
+  keywords: [text, generative ai]

@@ -1,0 +1,7 @@
+jtype: FlanExecutor
+py_modules:
+  - executor.py
+metas:
+  name: FlanExecutor
+  description: Executor for generative text using Flan model
+  keywords: [text, generative ai]

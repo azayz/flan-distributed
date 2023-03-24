@@ -1,43 +1,18 @@
-import asyncio
 import io
-
-from typing import Optional, Tuple
 
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoConfig
-import os
 import random
 import numpy as np
 from transformers.models.t5.modeling_t5 import T5Stack
 from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions
 
-from docarray.typing import TorchTensor
-from docarray import BaseDocument
-from jina import Executor, requests, DocumentArray, Deployment, Flow, Client
-from jina.serve.runtimes.gateway.http.fastapi import FastAPIBaseGateway
-
-
-class InputSchema(BaseDocument):
-    input_ids: Optional[TorchTensor]
-    attention_mask: Optional[TorchTensor]
-    encoder_hidden_states: Optional[TorchTensor]
-    encoder_attention_mask: Optional[TorchTensor]
-    inputs_embeds: Optional[TorchTensor]
-    head_mask: Optional[TorchTensor]
-    cross_attn_head_mask: Optional[TorchTensor]
-    past_key_values: Optional[bytes]
-    use_cache: Optional[bool]
-    output_attentions: Optional[bool]
-    output_hidden_states: Optional[bool]
-    return_dict: Optional[bool]
-
-
-class OutputSchema(BaseDocument):
-    last_hidden_state: Optional[TorchTensor]
-    past_key_values: Optional[bytes] = None
-    hidden_states: Optional[TorchTensor] = None
-    attentions: Optional[TorchTensor] = None
-    cross_attentions: Optional[TorchTensor] = None
+from jina import Flow, Client
+from fastapi import FastAPI
+from uvicorn import Server, Config
+from jina import DocumentArray, Gateway
+from executor.encoder import EncoderExecutor, InputSchema, OutputSchema
+from executor.decoder import DecoderExecutor
 
 
 def set_random_seeds(random_seed=0):
@@ -46,41 +21,6 @@ def set_random_seeds(random_seed=0):
     torch.backends.cudnn.benchmark = False
     np.random.seed(random_seed)
     random.seed(random_seed)
-
-
-class Encoder(Executor):
-
-    def __init__(self, model_name: str, device_map: dict, **kwargs):
-        super().__init__(**kwargs)
-        self.model_name = model_name
-        self.device_map = {}
-        for k, v in device_map.items():
-            self.device_map[int(k)] = v
-        self.model_encoder = AutoModelForSeq2SeqLM.from_pretrained(self.model_name).encoder
-        print('model loaded to cpu')
-        self.model_encoder.parallelize(self.device_map)
-        print('model sent to GPU')
-
-    @requests
-    def encode(self, docs: DocumentArray[InputSchema], **kwargs) -> DocumentArray[OutputSchema]:
-        outputs = DocumentArray[OutputSchema]()
-
-        for doc in docs:
-            doc_as_dict = dict(doc)
-            doc_as_dict.pop('id')
-            for k, v in doc_as_dict.items():
-                if isinstance(v, TorchTensor):
-                    doc_as_dict[k] = v.to('cuda:0')
-            model_output = self.model_encoder(**doc_as_dict)
-
-            if "past_key_values" in model_output:
-                buffer = io.BytesIO()
-                torch.save(model_output["past_key_values"], buffer)
-                serialized_tensor = buffer.getvalue()
-                model_output["past_key_values"] = serialized_tensor
-            model_output = OutputSchema(**model_output)
-            outputs.extend([model_output])
-        return outputs
 
 
 class T5StackWrapper(T5Stack):
@@ -139,114 +79,6 @@ class T5StackWrapper(T5Stack):
         return BaseModelOutputWithPastAndCrossAttentions(
             **outputs
         )
-
-
-'''
-set_random_seeds()
-
-with Deployment(uses=Encoder, uses_with={
-    'model_name': "google/flan-t5-xl",
-    'device_map': {
-        0: list(range(0, 8)),
-        1: list(range(8, 16)),
-        2: list(range(16, 24)),
-    }}, port=12346) as dep:
-    config, _ = AutoConfig.from_pretrained(
-        "google/flan-t5-xl",
-        return_unused_kwargs=True,
-        trust_remote_code=True,
-    )
-    t5stack_wrapper = T5StackWrapper(config, dep, embed_tokens=torch.nn.Embedding(config.vocab_size, config.d_model,
-                                                                                  device='cuda:0'))
-    output = t5stack_wrapper(
-        input_ids=torch.tensor(
-            [[30355, 15, 8, 826, 1566, 1499, 12, 2379, 10, 3, 31, 3845, 63, 6, 149, 33, 25, 58, 31, 1]],
-            device='cuda:0', dtype=torch.int64),
-        attention_mask=torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]], device='cuda:0',
-                                    dtype=torch.int64),
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-        inputs_embeds=None,
-        head_mask=None,
-        cross_attn_head_mask=None,
-        past_key_values=None,
-        use_cache=None,
-        output_attentions=False,
-        output_hidden_states=False,
-        return_dict=True
-    )
-    print(output)'''
-
-
-class Decoder(Executor):
-    def __init__(self, model_name: str, device_map: dict, **kwargs):
-        super().__init__(**kwargs)
-        self.model_name = model_name
-        self.device_map = {int(k): v for k, v in device_map.items()}
-        self.model_decoder = AutoModelForSeq2SeqLM.from_pretrained(self.model_name).decoder
-        print('model loaded to cpu')
-        self.model_decoder.parallelize(self.device_map)
-        print('model sent to GPU')
-
-    @requests
-    def decode(self, docs: DocumentArray[InputSchema], **kwargs) -> DocumentArray[OutputSchema]:
-        outputs = DocumentArray[OutputSchema]()
-        for doc in docs:
-            inputs = dict(doc)
-            inputs.pop('id')
-            if inputs["past_key_values"] and len(inputs["past_key_values"]) > 0:
-                buffer = io.BytesIO(inputs["past_key_values"])
-                inputs["past_key_values"] = torch.load(buffer)
-            for k, v in inputs.items():
-                if isinstance(v, torch.Tensor):
-                    inputs[k] = v.to("cuda:0")
-            model_output = self.model_decoder(**inputs)
-            buffer = io.BytesIO()
-
-            torch.save(model_output["past_key_values"], buffer)
-            serialized_tensor = buffer.getvalue()
-            model_output["past_key_values"] = serialized_tensor
-            output = OutputSchema(**model_output)
-            outputs.extend([output])
-        return outputs
-
-
-'''
-with Deployment(uses=Decoder, uses_with={
-    'model_name': "google/flan-t5-xl",
-    'device_map': {
-        0: list(range(0, 8)),
-        1: list(range(8, 16)),
-        2: list(range(16, 24)),
-    }}, port=12346) as dep:
-    config, _ = AutoConfig.from_pretrained(
-        "google/flan-t5-xl",
-        return_unused_kwargs=True,
-        trust_remote_code=True,
-    )
-    t5stack_wrapper = T5StackWrapper(config, dep,
-                                     embed_tokens=torch.nn.Embedding(config.vocab_size, config.d_model).to('cuda:0'))
-    output = t5stack_wrapper(
-        input_ids=torch.tensor([[6]], device='cuda:0'),
-        attention_mask=None,
-        encoder_hidden_states=torch.rand((1, 20, 2048), device='cuda:0') - 0.5,
-        encoder_attention_mask=torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
-                                            device='cuda:0', dtype=torch.int64),
-        inputs_embeds=None,
-        head_mask=None,
-        cross_attn_head_mask=None,
-        past_key_values=None,
-        use_cache=True,
-        output_attentions=False,
-        output_hidden_states=False,
-        return_dict=True
-    )
-    print(output)
-'''
-
-from fastapi import FastAPI
-from uvicorn import Server, Config
-from jina import DocumentArray, Gateway
 
 
 class MyGateway(Gateway):
@@ -333,8 +165,6 @@ class MyGateway(Gateway):
                 """
                 await self.main_loop()
 
-        # step 6: bind the gateway server to the right port and host
-        print(self.port, self.host)
         self.server = UviServer(Config(app, host=self.host, port=self.port))
         await self.server.setup()
 
@@ -355,7 +185,7 @@ flow = Flow().config_gateway(
         'model_name': "google/flan-t5-xl"
     }
 ).add(
-    uses=Encoder, uses_with={
+    uses=EncoderExecutor, uses_with={
         'model_name': "google/flan-t5-xl",
         'device_map': {
             0: list(range(0, 8)),
@@ -363,7 +193,7 @@ flow = Flow().config_gateway(
             2: list(range(16, 24)),
         }}, port=12346
 ).add(
-    uses=Decoder, uses_with={
+    uses=DecoderExecutor, uses_with={
         'model_name': "google/flan-t5-xl",
         'device_map': {
             0: list(range(0, 8)),
