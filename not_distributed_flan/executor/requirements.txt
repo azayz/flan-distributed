@@ -1,0 +1,2 @@
+transformers==4.27.1
+docarray==0.30.0a3
