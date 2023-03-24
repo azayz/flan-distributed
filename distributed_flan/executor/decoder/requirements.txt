@@ -1,0 +1,6 @@
+docarray==0.30.0a3
+jina==3.14.1
+transformers==4.27.1
+torch==2.0.0
+fastapi==0.95.0
+numpy==1.24.2
