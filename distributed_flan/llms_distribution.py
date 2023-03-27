@@ -112,13 +112,16 @@ class MyGateway(Gateway):
         # step 1: create an app and define the service endpoint
         app = FastAPI(title='Custom Gateway')
 
+        from pydantic import BaseModel
+
+        class Input(BaseModel):
+            input_text: str
+
         @app.get(path='/generate')
-        def generate():
+        def generate(prompt: Input):
             max_length = 100
             num_return_sequences = 1
-            input_text = (
-                "Translate the following English text to French: 'Hey, how are you?'"
-            )
+            input_text = prompt.input_text
 
             input_ids = self.tokenizer.encode(input_text, return_tensors="pt")
 
@@ -224,3 +227,14 @@ flow = (
 )
 with flow as f:
     f.block()
+
+
+import requests
+
+# Set up the payload with the prompt as a query parameter
+payload = {
+    'input_text': "Translate the following English text to French: 'Hey, how are you?'"
+}
+
+# Make the request
+response = requests.get('http://localhost://12348/generate', params=payload)
