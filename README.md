@@ -1,5 +1,5 @@
 # Flan-Distributed
-Distributing Flan Model using multiple-GPUs Jina Ecosystem, This is dedicated to the Flan LLM family 
+Distributing Flan Model using multiple-GPUs in Jina Ecosystem, This is dedicated to the Flan LLM family 
 so you can change the model name to any model within the same family depending on your GPU capacities
 
 <p align="center">
